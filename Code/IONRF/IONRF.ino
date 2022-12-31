@@ -16,8 +16,8 @@ pin 7 nRF24L01 MISO ---  4   PA6 7|    |8  PA5  5    --- nRF24L01 MOSI pin6
 */
 
 #include <RF24.h>
-
-// CE and CSN are configurable, specified values for ATtiny84 as connected above, FIXED!
+#include <SPI.h>
+// PINS NOW OK!
 #define CE_PIN 7
 #define CSN_PIN 3
 // GPIO pin settings
@@ -29,7 +29,7 @@ pin 7 nRF24L01 MISO ---  4   PA6 7|    |8  PA5  5    --- nRF24L01 MOSI pin6
 #define DIG_IN_2 2
 
 const byte ADDR[6] = "00001";
-
+uint8_t errv = 0;
 RF24 radio(CE_PIN,CSN_PIN);
 void startupIONRF();
 uint8_t getCoolantLevel();
@@ -41,6 +41,8 @@ void setup()
 {
   // Setup input and output pins
   pinMode(LED_PIN, OUTPUT);
+  pinMode(CSN_PIN, OUTPUT);
+  pinMode(CE_PIN, OUTPUT);
   pinMode(XKC_PIN, INPUT);
   pinMode(RELAY_1, OUTPUT);
   pinMode(RELAY_2, OUTPUT);
@@ -49,36 +51,37 @@ void setup()
   
   // Shut-off RED LED
   digitalWrite(LED_PIN, HIGH);
-
+  delay(2000);
   // First start
+  digitalWrite(LED_PIN, LOW);
   startupIONRF();
-  getAndTransmitThruRF24();
-  radio.powerDown();
-  delay(3000);
-  radio.powerUp();
+  digitalWrite(LED_PIN, HIGH);
 }
 
 void loop() 
 {
-  startupIONRF();
-  getAndTransmitThruRF24();
-  radio.powerDown();
-  delay(3000);
-  radio.powerUp();
+  // TEST LOOP sending data to ESP32 NRF24L01
+  digitalWrite(LED_PIN, LOW);
+  char buf[32] = "ATTINY84";
+  radio.write(&buf, sizeof(buf));
+  digitalWrite(LED_PIN, HIGH);
+  delay(1000); 
 }
 
 void startupIONRF()
 {
   // startup NRF24L01 Radio Module
-  while(!radio.begin());  //stuck while radio is not available
+  while(!radio.begin())
+  {
+    delay(500);
+  }
+  uint8_t err = 0;
   radio.openWritingPipe(ADDR);
-  radio.setPALevel(RF24_PA_LOW);
+  radio.setPALevel(RF24_PA_MAX);
+  //radio.setChannel(100);
   //radio.setDataRate(RF24_250KBPS);
   radio.stopListening();
-  // Light up LED for 1 sec
-  digitalWrite(LED_PIN, LOW);
-  delay(1000);
-  digitalWrite(LED_PIN, HIGH);
+  radio.setAutoAck(1);
 }
 
 uint8_t getCoolantLevel()
@@ -144,5 +147,5 @@ void getAndTransmitThruRF24()
   state[2] = getCoolantLevel();
   state[3] = 'F';
   state[4] = 'F';
-  while(!radio.write(&state, sizeof(state)));
+  radio.write(&state, sizeof(state));
 }

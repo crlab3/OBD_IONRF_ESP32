@@ -1,4 +1,5 @@
 // Mazda 6 2.2d Version without Brightness Control
+// NRF24L01 WORKING!!!!
 #include "pitches.h"
 #include "BluetoothSerial.h"
 #include "ELMduino.h"
@@ -23,12 +24,15 @@ BluetoothSerial SerialBT;
 #define RES_PWM 10
 #define LED_MAX 1023
 
+#define NRF_CE 21
+#define NRF_CS 5
+
 /*GPIOs*/
 
 //LEFT ID = 2
 #define LEFT_RGB 2
 #define RGB_LEFT_RED 16
-#define RGB_LEFT_BLUE 4
+#define RGB_LEFT_BLUE 25
 #define RGB_LEFT_GREEN 17
 
 #define RIGHT_RGB 1
@@ -37,10 +41,10 @@ BluetoothSerial SerialBT;
 #define RGB_RIGHT_BLUE 33
 
 #define DPF_LED 12
-#define STATUS_LED 26
-#define OIL_LED 27
+#define STATUS1_LED 26
+#define STATUS2_LED 27
 
-#define BUZZER_PIN 25
+#define BUZZER_PIN 4
 
 //bonding removal stuff
 #define REMOVE_BONDED_DEVICES 1   // <- Set to 0 to view all bonded devices addresses, set to 1 to remove
@@ -50,7 +54,7 @@ char bda_str[18];
 
 ELM327 myELM327;
 
-RF24 radio(15,5); //15 pin not connected to CE, CE is always ON, IO5 is for CSN
+RF24 radio(21,5); // CE pin at 21, CSN pin at 5
 
 struct RGBColor
 {
@@ -119,7 +123,7 @@ void setup()
 
   //-------------------SETUP LEDs---------------------
   
-  uint8_t LEDPins[9]={RGB_RIGHT_RED,RGB_RIGHT_GREEN,RGB_RIGHT_BLUE,RGB_LEFT_RED,RGB_LEFT_GREEN,RGB_LEFT_BLUE,DPF_LED,STATUS_LED,OIL_LED};
+  uint8_t LEDPins[9]={RGB_RIGHT_RED,RGB_RIGHT_GREEN,RGB_RIGHT_BLUE,RGB_LEFT_RED,RGB_LEFT_GREEN,RGB_LEFT_BLUE,DPF_LED,STATUS1_LED,STATUS2_LED};
   int i = 0;
   for(i=0; i<9; i++)
   {
@@ -136,17 +140,17 @@ void setup()
   }
   setSingleLEDValue(DPF_LED, LED_MAX, 1);
   delay(150);
-  setSingleLEDValue(STATUS_LED, LED_MAX, 1);
+  setSingleLEDValue(STATUS1_LED, LED_MAX, 1);
   delay(150);
-  setSingleLEDValue(OIL_LED, LED_MAX, 1);
+  setSingleLEDValue(STATUS2_LED, LED_MAX, 1);
   delay(150);
   setSingleLEDValue(DPF_LED, 0, 0);
   delay(150);
-  setSingleLEDValue(STATUS_LED, 0, 0);
+  setSingleLEDValue(STATUS1_LED, 0, 0);
   delay(150);
-  setSingleLEDValue(OIL_LED, 0, 0);
+  setSingleLEDValue(STATUS2_LED, 0, 0);
   delay(150);
-
+  playToneBuzzer(3, NOTE_G6);
   setRGBLEDColor(LEFT_RGB, 0, 0, 0, 0);
   setRGBLEDColor(RIGHT_RGB, 0, 0, 0, 0);
 
@@ -156,9 +160,26 @@ void setup()
   DEBUG_PORT.begin(115200);
   DEBUG_PORT.println("Start my RF24 now...");
   startmyRF24();
+  radio.printPrettyDetails();
   DEBUG_PORT.println("RF24 started up...");
-  //-------------------Finished starting up NRF24L01+ Radio Module---------------------
 
+    //-------------------Finished starting up NRF24L01+ Radio Module---------------------
+
+    // FOR TESTING NRF24L01
+  while(1)
+  {
+    if(radio.available())
+    {
+    playToneBuzzer(1, NOTE_A4);
+    char text[32];
+    DEBUG_PORT.println("Received NRF24L01 packet...");
+    radio.read(&text, sizeof(text));
+    //DEBUG_PORT.print("Coolant Level Received: ");
+    DEBUG_PORT.println(text);
+    }
+  }
+  // -----------------------FOR TESTING NRF-----------------------------
+ 
   //-------------------Start Bluetooth Connection---------------------
   // 1. Remove all bonded devices.  
   removeAllBonded();
@@ -186,18 +207,23 @@ void setup()
   setRGBLEDColor(RIGHT_RGB,0,0,0,0);
   setRGBLEDColor(LEFT_RGB,0,0,0,0);
   setSingleLEDValue(DPF_LED,0,0);
-  setSingleLEDValue(STATUS_LED,LED_MAX,1);
-  playToneBuzzer(3, NOTE_C3);
+  setSingleLEDValue(STATUS1_LED,LED_MAX,1);
+  //tone(BUZZER_PIN, 2000, 2);
+  //playToneBuzzer(3, NOTE_G5);
+
+// FOR TESTING NRF
+
 }
 
 
 void loop()
 {
+
   /*-------------------------START OF MAIN LOOP--------------------------*/
   loopCount++;
   loopCount%=25500;
   // Turn off status LED, until received good OBD data.
-  setSingleLEDValue(STATUS_LED,0,0);
+  setSingleLEDValue(STATUS1_LED,0,0);
 
   if(loopCount%20000 == 0)
   {
@@ -236,7 +262,7 @@ void loop()
 
     if(myELM327.nb_rx_state == ELM_SUCCESS)
     {
-      setSingleLEDValue(STATUS_LED,LED_MAX,1);  // show status LED blink, when received value
+      setSingleLEDValue(STATUS1_LED,LED_MAX,1);  // show status LED blink, when received value
       setSingleLEDValue(DPF_LED,0,0);           // switch off DPF LED
       queryFlag++;                              
       queryFlag%=4;                             // query increment & modulo division for switch between values to get
@@ -244,7 +270,7 @@ void loop()
       printAllValues();                         // print out all read values to DEBUG_PORT (Serial)
       setRGBLEDColor(LEFT_RGB,HeatScale[MY_ENGINE_OIL_TEMP+40].R,HeatScale[MY_ENGINE_OIL_TEMP+40].G,HeatScale[MY_ENGINE_OIL_TEMP+40].B,1);
       setRGBLEDColor(RIGHT_RGB,HeatScale[MY_ENGINE_COOLANT_TEMP+40].R,HeatScale[MY_ENGINE_COOLANT_TEMP+40].G,HeatScale[MY_ENGINE_COOLANT_TEMP+40].B,1);
-      setSingleLEDValue(STATUS_LED,0,0);        // show status LED blink, when received value
+      setSingleLEDValue(STATUS1_LED,0,0);        // show status LED blink, when received value
       
       if(MY_REGEN_STATE != 0)                   // alert with LED diesel particle filter (DPF) regeneration state
         setSingleLEDValue(DPF_LED,LED_MAX,1);       
@@ -254,7 +280,7 @@ void loop()
     }
     else if(myELM327.nb_rx_state != ELM_GETTING_MSG)  // alert with blank STATUS LED for bad received data
     {
-      setSingleLEDValue(STATUS_LED,0,0);
+      setSingleLEDValue(STATUS1_LED,0,0);
       Serial.println("ELM ERROR OCCURRED");
       myELM327.printError();
       errorCount++;                              // increase number of errors occured
@@ -304,11 +330,11 @@ void setSingleLEDValue(uint8_t ID, uint16_t value, float brightness)
       ledcWrite(6,(LED_MAX-value)*(1-brightness));
       break;
 
-    case STATUS_LED:
+    case STATUS1_LED:
       ledcWrite(7,(LED_MAX-value)*(1-brightness));
       break;
 
-    case OIL_LED:
+    case STATUS2_LED:
       ledcWrite(8,(LED_MAX-value)*(1-brightness));
       break;
     
@@ -399,17 +425,16 @@ bool initBluetooth()
 
 void startmyRF24()
 {
-uint8_t RF24_ADDR[6] = { "00001"};
-bool radionumber = 1; // this radio will use address[1] to transmit
-bool role = false; // this is a radio receiver
-float payload = 0.0;
+const byte RF24_ADDR[6] = {"00001"};
 while(!radio.begin()) 
   {
     DEBUG_PORT.println(F("NRF24L01 hardware is not responding, retrying..."));
     delay(1000);
   }
+int result = 1;
 radio.openReadingPipe(0, RF24_ADDR);
-radio.setPALevel(RF24_PA_LOW);
+radio.setPALevel(RF24_PA_MIN);
+//radio.setDataRate(RF24_250KBPS);
 radio.startListening();
 DEBUG_PORT.println("NRF24L01 hardware is listening!");
 }
@@ -459,12 +484,24 @@ void printAllValues()
 
 uint8_t getCoolantLevel()
 {
+
   DEBUG_PORT.println("Starting to get coolant level...");
-  while (!radio.available()); //stuck while waiting for packet
+  /*
+  if(radio.isChipConnected())
+  {
+    DEBUG_PORT.println("Chip OK!");
+  }
+  else
+  DEBUG_PORT.println("Chip not OK!");
+  */
+  char text[32]="";  // first set it as unknown
+  if(radio.available())
+  {  
   DEBUG_PORT.println("Received NRF24L01 packet...");
-  uint8_t text = 2;  // first set it as unknown
   radio.read(&text, sizeof(text));
-  DEBUG_PORT.print("Coolant Level Received: ");
+  //DEBUG_PORT.print("Coolant Level Received: ");
   DEBUG_PORT.println(text);
-  return text;
+  }
+
+  return 1;
 }
