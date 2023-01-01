@@ -15,7 +15,7 @@
 #include"esp_gap_bt_api.h"
 #include "esp_err.h"
 
-#define GR_CORR 0.3
+#define GR_CORR 0.5
 
 BluetoothSerial SerialBT;
 #define ELM_PORT   SerialBT
@@ -45,6 +45,7 @@ BluetoothSerial SerialBT;
 #define STATUS2_LED 27
 
 #define BUZZER_PIN 4
+#define BUZZER_PWM_CHN 10
 
 //bonding removal stuff
 #define REMOVE_BONDED_DEVICES 1   // <- Set to 0 to view all bonded devices addresses, set to 1 to remove
@@ -131,6 +132,8 @@ void setup()
     ledcAttachPin(LEDPins[i], i);  
     ledcWrite(i, LED_MAX);
   }
+  delay(1000);
+
   //-------------------START LEDs blinking----------------------
   for(i=0;i<1020;i++)
   {
@@ -151,6 +154,7 @@ void setup()
   setSingleLEDValue(STATUS2_LED, 0, 0);
   delay(150);
   playToneBuzzer(3, NOTE_G6);
+  playToneBuzzer(2, NOTE_C6);
   setRGBLEDColor(LEFT_RGB, 0, 0, 0, 0);
   setRGBLEDColor(RIGHT_RGB, 0, 0, 0, 0);
 
@@ -170,13 +174,23 @@ void setup()
   {
     if(radio.available())
     {
-    playToneBuzzer(1, NOTE_A4);
-    char text[32];
+    //playToneBuzzer(1, NOTE_A4);
+    char text[5];
     DEBUG_PORT.println("Received NRF24L01 packet...");
     radio.read(&text, sizeof(text));
     //DEBUG_PORT.print("Coolant Level Received: ");
     DEBUG_PORT.println(text);
+    if(text[0]=='?' && text[4]=='$')
+    {
+      if(text[3]=='L')
+      {
+        // coolant level low
+      }
+       // coolant level ok
+      // received data endpoints OK.
     }
+    }
+    
   }
   // -----------------------FOR TESTING NRF-----------------------------
  
@@ -437,17 +451,23 @@ radio.setPALevel(RF24_PA_MIN);
 //radio.setDataRate(RF24_250KBPS);
 radio.startListening();
 DEBUG_PORT.println("NRF24L01 hardware is listening!");
+
 }
 
 void playToneBuzzer(uint8_t num_beeps, uint32_t note)
 {
   int i=0;
+  ledcSetup(BUZZER_PWM_CHN, note, RES_PWM);
+  ledcAttachPin(BUZZER_PIN, BUZZER_PWM_CHN);
+  ledcWrite(BUZZER_PWM_CHN, 0);
   for(i=0;i<num_beeps;i++)
   {
-    tone(BUZZER_PIN, note, 100);
-    noTone(BUZZER_PIN);
+    ledcWrite(BUZZER_PWM_CHN, 512);
+    delay(100);
+    ledcWrite(BUZZER_PWM_CHN, 0);
     delay(100);
   }
+  ledcWrite(BUZZER_PWM_CHN, 0);
 }
 
 void printAllValues()
