@@ -11,10 +11,12 @@
 #define RELAY_2 9
 #define DIG_IN_1 0
 #define DIG_IN_2 2
+#define SEND_INTERVAL 512
+#define GPIO_SET_INTERVAL 2048
+
 
 const byte ADDR[6] = "00001";
-char errv, coolant_lvl = 0;
-unsigned char output[3] = {'1','1','2'};
+uint8_t LEDSTATE = 0;
 RF24 radio(CE_PIN,CSN_PIN);
 void startupIONRF();
 char getCoolantLevel();
@@ -43,27 +45,35 @@ void setup()
 
 void loop() 
 {
+  
   // TEST LOOP sending data to ESP32 NRF24L01
-  char buf[5];
-  buf[0] = '?';
-  if(digitalRead(DIG_IN_1) == 1)
-    buf[1] = 'H';
-  else
-    buf[1] = 'L';
-  if(digitalRead(DIG_IN_2) == 1)
-    buf[2] = 'H';
-  else
-    buf[2] = 'L';
-  uint32_t levelResult = analogRead(XKC_PIN);
-  if(levelResult<750)
-    buf[3] = 'H';
-  else
-    buf[3] = 'L';
-  buf[4] = '$';
-  digitalWrite(LED_PIN, LOW);
-  radio.write(&buf, sizeof(buf));
-  digitalWrite(LED_PIN, HIGH);
-  delay(300); 
+  unsigned long cTime = millis();
+  if(cTime % SEND_INTERVAL == 0)
+  {
+    char buf[5]="";
+    buf[0] = '?';
+    if(digitalRead(DIG_IN_1) == 1)
+      buf[1] = 'H';
+    else
+      buf[1] = 'L';
+    if(digitalRead(DIG_IN_2) == 1)
+      buf[2] = 'H';
+    else
+      buf[2] = 'L';
+    uint32_t levelResult = analogRead(XKC_PIN);
+    if(levelResult<750)
+      buf[3] = 'H';
+    else
+      buf[3] = 'L';
+    buf[4] = '$';
+    radio.write(&buf, sizeof(buf));
+  }
+  if(cTime % GPIO_SET_INTERVAL == 0)
+  {
+    outputState = 
+    setDigitalOutputLevels(uint8_t outputState);
+  }
+
 }
 
 void startupIONRF()
