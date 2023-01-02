@@ -27,9 +27,12 @@ BluetoothSerial SerialBT;
 #define NRF_CE 21
 #define NRF_CS 5
 
+#define OBD_UPDATE_INTERVAL 1000
+#define COOLANT_LOW_LIMIT 10
+
 /*GPIOs*/
 
-//LEFT ID = 2
+//LEFT ID = 2, RIGHT ID = 1
 #define LEFT_RGB 2
 #define RGB_LEFT_RED 16
 #define RGB_LEFT_BLUE 25
@@ -72,13 +75,14 @@ uint32_t MY_ENGINE_COOLANT_TEMP = 0;
 uint32_t MY_REGEN_COUNT = 0;
 uint32_t MY_REGEN_STATE = 0;
 uint8_t MY_COOLANT_LEVEL = 2; // 0 - level Low, 1 - Level OK, 2 - Level Unknown
+uint8_t COOLANT_LOW_CNTR = 0;
+uint32_t RADIO_UNAVAILABLE = 0;
 
 int cyclecounter = 0;
 
 void setSingleLEDValue(uint8_t ID, uint16_t value, float brightness);
 void setRGBLEDColor(uint8_t ID, uint16_t R, uint16_t G, uint16_t B, float brightness);
 void startmyRF24();
-uint8_t getCoolantLevel();
 void playToneBuzzer(uint8_t num_beeps, uint32_t note);
 void printAllValues();
 
@@ -92,7 +96,7 @@ uint16_t loopCount = 0;
 void setup()
 {
 
-  // create heatscale
+  // create HeatScale
   int j=0;
   for(j=0;j<255;j++)
   {
@@ -130,16 +134,15 @@ void setup()
   {
     ledcSetup(i, 1000, RES_PWM);
     ledcAttachPin(LEDPins[i], i);  
-    ledcWrite(i, LED_MAX);
+    ledcWrite(i, LED_MAX);  //inverted logic!, 1023 = zero light
   }
-  delay(1000);
 
-  //-------------------START LEDs blinking----------------------
-  for(i=0;i<1020;i++)
+  //-------------------START LEDs PWM & TEST----------------------
+  for(i=0;i<1024;i++)
   {
     setRGBLEDColor(LEFT_RGB, i, i, i, 1);
     setRGBLEDColor(RIGHT_RGB, i, i, i, 1);
-    delay(5);
+    delay(2);
   }
   setSingleLEDValue(DPF_LED, LED_MAX, 1);
   delay(150);
@@ -153,10 +156,8 @@ void setup()
   delay(150);
   setSingleLEDValue(STATUS2_LED, 0, 0);
   delay(150);
-  playToneBuzzer(3, NOTE_G6);
-  playToneBuzzer(2, NOTE_C6);
-  setRGBLEDColor(LEFT_RGB, 0, 0, 0, 0);
-  setRGBLEDColor(RIGHT_RGB, 0, 0, 0, 0);
+  setRGBLEDColor(LEFT_RGB, LED_MAX, 0, 0, 1);
+  setRGBLEDColor(RIGHT_RGB, LED_MAX, 0, 0, 1);
 
   //-------------------SETUP LEDs END---------------------
   
@@ -166,33 +167,9 @@ void setup()
   startmyRF24();
   radio.printPrettyDetails();
   DEBUG_PORT.println("RF24 started up...");
-
-    //-------------------Finished starting up NRF24L01+ Radio Module---------------------
-
-    // FOR TESTING NRF24L01
-  while(1)
-  {
-    if(radio.available())
-    {
-    //playToneBuzzer(1, NOTE_A4);
-    char text[5];
-    DEBUG_PORT.println("Received NRF24L01 packet...");
-    radio.read(&text, sizeof(text));
-    //DEBUG_PORT.print("Coolant Level Received: ");
-    DEBUG_PORT.println(text);
-    if(text[0]=='?' && text[4]=='$')
-    {
-      if(text[3]=='L')
-      {
-        // coolant level low
-      }
-       // coolant level ok
-      // received data endpoints OK.
-    }
-    }
-    
-  }
-  // -----------------------FOR TESTING NRF-----------------------------
+  setRGBLEDColor(LEFT_RGB, LED_MAX, LED_MAX, 0, 1);
+  setRGBLEDColor(RIGHT_RGB, LED_MAX, LED_MAX, 0, 1);
+  //-------------------Finished NRF24L01+ Radio Module Init---------------------
  
   //-------------------Start Bluetooth Connection---------------------
   // 1. Remove all bonded devices.  
@@ -221,58 +198,109 @@ void setup()
   setRGBLEDColor(RIGHT_RGB,0,0,0,0);
   setRGBLEDColor(LEFT_RGB,0,0,0,0);
   setSingleLEDValue(DPF_LED,0,0);
-  setSingleLEDValue(STATUS1_LED,LED_MAX,1);
-  //tone(BUZZER_PIN, 2000, 2);
-  //playToneBuzzer(3, NOTE_G5);
-
-// FOR TESTING NRF
-
+  setSingleLEDValue(STATUS1_LED,LED_MAX,1); // Status 1 LED shows all is OK
+  setSingleLEDValue(STATUS2_LED,0,0);
+  playToneBuzzer(1, NOTE_A4);
+  playToneBuzzer(1, NOTE_A5);
+  playToneBuzzer(1, NOTE_A6);
 }
-
 
 void loop()
 {
+  // Get timer value at starting point
+  unsigned long cTime = millis();
 
-  /*-------------------------START OF MAIN LOOP--------------------------*/
-  loopCount++;
-  loopCount%=25500;
-  // Turn off status LED, until received good OBD data.
-  setSingleLEDValue(STATUS1_LED,0,0);
-
-  if(loopCount%20000 == 0)
+  // Get data from radio module instantly, regardless of millis()
+  if(radio.available())
   {
-    switch (queryFlag)
+    RADIO_UNAVAILABLE = 0;  // reset radio unavailable counter
+    char buffer[10];
+    DEBUG_PORT.println("Received NRF24L01 packet...");
+    radio.read(&buffer, sizeof(buffer));
+    DEBUG_PORT.println(buffer);
+    if(buffer[0]=='?' && buffer[4]=='$')  // if valid packet is received
     {
-    case 0: 
-      MY_ENGINE_OIL_TEMP = myELM327.oilTemp();
-      /* code */
-      break;
-    case 1:
-      MY_ENGINE_COOLANT_TEMP = myELM327.engineCoolantTemp();
-      break;
-    case 2:
-      MY_COOLANT_LEVEL = getCoolantLevel();
-      //MY_ENGINE_RPM = myELM327.rpm();
-      break;
-    case 3:
-      MY_REGEN_STATE = myELM327.processPID(0x22,0x0380,1,1,1,0);
-      //MY_REGEN_COUNT = myELM327.processPID(0x22,0x0432,1,2,1,0);
-      break;
-    case 4:
-      // will not be run while queryFlag%=4!
-      //MY_REGEN_STATE = myELM327.processPID(0x22,0x0380,1,1,1,0);
-	  break;
-    default:
-      break;
+      if(buffer[3]=='L')
+      {
+        MY_COOLANT_LEVEL = 0;
+      }
+      if(buffer[3]=='H')
+      {
+        MY_COOLANT_LEVEL = 1;
+      }
+      // option: do extra operations with digital inputs from the car in buf[1] & buf[2]
     }
-    //  Always alert for low coolant!
-    while(getCoolantLevel() == 0)
+  }
+  else
+  {    
+    RADIO_UNAVAILABLE++; // no data was received
+  }
+
+/*-------------------------START OF MAIN TIMED LOOP--------------------------*/
+  if(cTime % OBD_UPDATE_INTERVAL < 2)
+  { 
+    // check for the amount of NOT received radio cycles
+    if(RADIO_UNAVAILABLE>50000) // if there were too many NOT received cycles
     {
-      // stuck in this loop while coolant is LOW!
-      playToneBuzzer(10, NOTE_G6);
-      // later on add LED alerts
+      RADIO_UNAVAILABLE = 0;    // reset radio unavailable counter
+      MY_COOLANT_LEVEL = 2;     // coolant state is unknown
     }
-    noTone(BUZZER_PIN);
+
+    // cycle through OBD and sensor queries
+    switch (queryFlag) 
+    {
+      case 0: 
+        MY_ENGINE_OIL_TEMP = myELM327.oilTemp();
+        break;
+      case 1:
+        MY_ENGINE_COOLANT_TEMP = myELM327.engineCoolantTemp();
+        break;
+      case 2:
+        {
+          switch(MY_COOLANT_LEVEL)
+          {
+            case 0:
+            {
+              DEBUG_PORT.println("Coolant LVL LOW!");
+              COOLANT_LOW_CNTR++; // coolant level low indicated, counter increment!
+              setSingleLEDValue(STATUS2_LED,0,0); // inverted logic
+              playToneBuzzer(1, NOTE_F5);
+              if(COOLANT_LOW_CNTR>COOLANT_LOW_LIMIT)
+              {
+                uint16_t i = 0;
+                for(i=0;i<5;i++)
+                {
+                  setRGBLEDColor(RIGHT_RGB, 0,0,0,0);
+                  playToneBuzzer(5, NOTE_F5);
+                  setRGBLEDColor(RIGHT_RGB, LED_MAX,LED_MAX,LED_MAX, 1);
+                  playToneBuzzer(5, NOTE_F5);
+                }
+                COOLANT_LOW_CNTR = 0; //Reset counter.
+              }
+            }
+            break;
+            case 1:
+            {
+              DEBUG_PORT.println("Coolant LVL OK.");
+              setSingleLEDValue(STATUS2_LED,0,0); // inverted logic
+              COOLANT_LOW_CNTR = 0; // reset coolant low indicator
+            }
+            break;
+            case 2:
+            {
+              DEBUG_PORT.println("Coolant LVL unknown...");
+              setSingleLEDValue(STATUS2_LED,LED_MAX,1); // inverted logic
+            }
+            break;
+          }
+        }
+        break;
+      case 3:
+        MY_REGEN_STATE = myELM327.processPID(0x22,0x0380,1,1,1,0);
+        break;
+      default:
+        break;
+    }
 
     if(myELM327.nb_rx_state == ELM_SUCCESS)
     {
@@ -301,13 +329,15 @@ void loop()
     }
 
   }
+/*-------------------------END OF MAIN TIMED LOOP--------------------------*/
 
-  //If too much errors occur without a single good received data.
+
+/*-------------------------ERROR HANDLING START--------------------------*/
   if(errorCount>40)
   {
     ESP.restart();
   }
-  /*-------------------------END OF MAIN LOOP--------------------------*/
+/*-------------------------ERROR HANDLING END--------------------------*/
 }
 
 void setRGBLEDColor(uint8_t ID, uint16_t R, uint16_t G, uint16_t B, float brightness)
@@ -500,28 +530,4 @@ void printAllValues()
       DEBUG_PORT.println("Coolant level: ERROR");
       break;
   }
-}
-
-uint8_t getCoolantLevel()
-{
-
-  DEBUG_PORT.println("Starting to get coolant level...");
-  /*
-  if(radio.isChipConnected())
-  {
-    DEBUG_PORT.println("Chip OK!");
-  }
-  else
-  DEBUG_PORT.println("Chip not OK!");
-  */
-  char text[32]="";  // first set it as unknown
-  if(radio.available())
-  {  
-  DEBUG_PORT.println("Received NRF24L01 packet...");
-  radio.read(&text, sizeof(text));
-  //DEBUG_PORT.print("Coolant Level Received: ");
-  DEBUG_PORT.println(text);
-  }
-
-  return 1;
 }
