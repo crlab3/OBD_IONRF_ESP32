@@ -3,11 +3,9 @@
 #include "pitches.h"
 #include "BluetoothSerial.h"
 #include "ELMduino.h"
-#include "Wire.h"
 #include "math.h"
-#include <BH1750.h>
 #include <SPI.h>
-#include "printf.h"
+//#include "printf.h"
 #include "RF24.h"
 // stuff for removing bonding
 #include "esp_bt_main.h"
@@ -27,11 +25,11 @@ BluetoothSerial SerialBT;
 #define NRF_CE 21
 #define NRF_CS 5
 
-#define OBD_UPDATE_INTERVAL 1000
+#define OBD_UPDATE_INTERVAL 100
 #define COOLANT_LOW_LIMIT 10
 #define COOLANT_LEVEL_TIMEOUT 100000
 #define ELM_ERROR_MAX 10
-
+#define ELMTIMEOUT 10000
 /*GPIOs*/
 
 //LEFT = COOLANT, RIGHT = OIL
@@ -95,7 +93,8 @@ uint8_t errorCount = 0;
 uint8_t queryFlag = 0;
 uint16_t loopCount = 0;
 uint32_t prevTime1 = 0;
-uint32_t prevTime2 = 0;
+uint32_t ELMPrevTime = 0;
+uint8_t ELMStateSuccess = 1;
 
 void setup()
 {
@@ -234,9 +233,9 @@ void loop()
   {
     RADIO_UNAVAILABLE = 0;  // reset radio unavailable counter
     char buffer[10];
-    DEBUG_PORT.println("Received NRF24L01 packet...");
+    //DEBUG_PORT.println("Received NRF24L01 packet...");
     radio.read(&buffer, sizeof(buffer));
-    DEBUG_PORT.println(buffer);
+    //DEBUG_PORT.println(buffer);
     if(buffer[0]=='?' && buffer[4]=='$')  // if valid packet is received
     {
       if(buffer[3]=='L')
@@ -258,7 +257,7 @@ void loop()
 /*-------------------------START OF MAIN TIMED LOOP--------------------------*/
   if(cTime - prevTime1 >= OBD_UPDATE_INTERVAL)
   { 
-    DEBUG_PORT.println("OBDUPDATE_CYCLE_FIRED!");
+    //DEBUG_PORT.println("OBDUPDATE_CYCLE_FIRED!");
     prevTime1 = cTime;
     // check for the amount of NOT received radio cycles
     if(RADIO_UNAVAILABLE>COOLANT_LEVEL_TIMEOUT) // if there were too many NOT received cycles
@@ -271,10 +270,12 @@ void loop()
     switch (queryFlag) 
     {
       case 0: 
-        MY_ENGINE_OIL_TEMP = myELM327.oilTemp();
+        MY_ENGINE_OIL_TEMP = (uint32_t)myELM327.oilTemp();
+        //DEBUG_PORT.println("queried engine oil.");
         break;
       case 1:
-        MY_ENGINE_COOLANT_TEMP = myELM327.engineCoolantTemp();
+        MY_ENGINE_COOLANT_TEMP = (uint32_t)myELM327.engineCoolantTemp();
+        //DEBUG_PORT.println("queried engine coolant.");
         break;
       case 2:
         {
@@ -317,20 +318,23 @@ void loop()
         }
         break;
       case 3:
-        MY_REGEN_STATE = myELM327.processPID(0x22,0x0380,1,1,1,0);
+        MY_REGEN_STATE = (uint32_t)myELM327.processPID(0x22,0x0380,1,1,1,0);
+        //DEBUG_PORT.println("queried regen state.");
         break;
       default:
         break;
     }
+
     if(myELM327.nb_rx_state == ELM_SUCCESS)
     {
+      queryFlag++;
+      queryFlag%=4;
+      DEBUG_PORT.println("----ELM SUCCESS----");
       //setSingleLEDValue(DPF_LED,0,0);           // switch off DPF LED
-      queryFlag++;                              
-      queryFlag%=4;                             // query increment & modulo division for switch between values to get
       errorCount = 0;                           // errors count is zeroed out, when ELM_SUCCESS occurs
-      if(queryFlag == 0)                        // if data queries are done
-      {
-        // update all LEDs!
+      // update all LEDs!
+      if(queryFlag == 0)
+      { //update only when all values are found
         setSingleLEDValue(DPF_LED,0,0);
         setSingleLEDValue(STATUS1_LED,LED_MAX,1);  // show status LED blink, when received value
         printAllValues();                         // print out all read values to DEBUG_PORT (Serial)
@@ -342,6 +346,7 @@ void loop()
           setSingleLEDValue(DPF_LED,0,0);
         setSingleLEDValue(STATUS1_LED,0,0);        // show status LED blink, when received value  
       }
+
     }
     else if(myELM327.nb_rx_state != ELM_GETTING_MSG)  // alert with blank STATUS LED for bad received data
       {
@@ -354,8 +359,6 @@ void loop()
 /*-------------------------END OF MAIN TIMED LOOP--------------------------*/
 
 /*-------------------------START OF UNTIMED ELM UPDATE LOOP--------------------------*/
-
-  
 
 /*-------------------------ERROR HANDLING START--------------------------*/
   if(errorCount>ELM_ERROR_MAX)
@@ -520,7 +523,7 @@ void printAllValues()
   DEBUG_PORT.print("Oil temp: "); 
   DEBUG_PORT.println(MY_ENGINE_OIL_TEMP);
   DEBUG_PORT.print("Coolant temp: "); 
-  DEBUG_PORT.println(MY_ENGINE_COOLANT_TEMP);
+  DEBUG_PORT.println((uint32_t)MY_ENGINE_COOLANT_TEMP);
   /*
   Serial.print("RPM: "); 
   Serial.println(MY_ENGINE_RPM); 
@@ -533,16 +536,16 @@ void printAllValues()
   switch(MY_COOLANT_LEVEL)
   {
     case 0: 
-      DEBUG_PORT.println("Coolant level: LOW");
+      DEBUG_PORT.println("LOW");
       break;
     case 1:
-      DEBUG_PORT.println("Coolant level: OK");
+      DEBUG_PORT.println("OK");
       break;
     case 2:
-      DEBUG_PORT.println("Coolant level: UNKNOWN");
+      DEBUG_PORT.println("UNKNOWN");
       break;
     default:
-      DEBUG_PORT.println("Coolant level: ERROR");
+      DEBUG_PORT.println("ERROR");
       break;
   }
 }
