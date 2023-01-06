@@ -29,19 +29,21 @@ BluetoothSerial SerialBT;
 
 #define OBD_UPDATE_INTERVAL 1000
 #define COOLANT_LOW_LIMIT 10
+#define COOLANT_LEVEL_TIMEOUT 100000
+#define ELM_ERROR_MAX 10
 
 /*GPIOs*/
 
-//LEFT ID = 2, RIGHT ID = 1
-#define LEFT_RGB 2
-#define RGB_LEFT_RED 16
-#define RGB_LEFT_BLUE 25
-#define RGB_LEFT_GREEN 17
+//LEFT = COOLANT, RIGHT = OIL
+#define LEFT_RGB 1
+#define RGB_LEFT_RED 32
+#define RGB_LEFT_BLUE 33
+#define RGB_LEFT_GREEN 13 
 
-#define RIGHT_RGB 1
-#define RGB_RIGHT_RED 32
-#define RGB_RIGHT_GREEN 13
-#define RGB_RIGHT_BLUE 33
+#define RIGHT_RGB 2
+#define RGB_RIGHT_RED 16
+#define RGB_RIGHT_GREEN 17
+#define RGB_RIGHT_BLUE 25 
 
 #define DPF_LED 12
 #define STATUS1_LED 26
@@ -92,6 +94,8 @@ char *bda2str(const uint8_t* bda, char *str, size_t size);
 uint8_t errorCount = 0;
 uint8_t queryFlag = 0;
 uint16_t loopCount = 0;
+uint32_t prevTime1 = 0;
+uint32_t prevTime2 = 0;
 
 void setup()
 {
@@ -102,26 +106,26 @@ void setup()
   {
     if(j>=0 && j<=90) //from -40C to +50C BLUE
     {
-      HeatScale[j].B = 1000;
+      HeatScale[j].B = LED_MAX;
       HeatScale[j].R = 0;
       HeatScale[j].G = 0; 
     }
     if(j>90 && j<=120) //from +50C to 80C YELLOW
     {
-      HeatScale[j].B = 0;
-      HeatScale[j].R = 1000;
-      HeatScale[j].G = 1000; 
+      HeatScale[j].B = LED_MAX;
+      HeatScale[j].R = LED_MAX;
+      HeatScale[j].G = LED_MAX; 
     }
     if(j>120 && j<=145) //from +80C to 105C RED-ORANGE
     {
       HeatScale[j].B = 0;
-      HeatScale[j].R = 1000;
-      HeatScale[j].G = 500; 
+      HeatScale[j].R = LED_MAX;
+      HeatScale[j].G = LED_MAX/2; 
     }
     if(j>145 && j<255) //above 105C RED
     {
       HeatScale[j].B = 0;
-      HeatScale[j].R = 1000;
+      HeatScale[j].R = LED_MAX;
       HeatScale[j].G = 0; 
     }
   }
@@ -132,17 +136,17 @@ void setup()
   int i = 0;
   for(i=0; i<9; i++)
   {
-    ledcSetup(i, 1000, RES_PWM);
+    ledcSetup(i, LED_MAX, RES_PWM);
     ledcAttachPin(LEDPins[i], i);  
     ledcWrite(i, LED_MAX);  //inverted logic!, 1023 = zero light
   }
 
   //-------------------START LEDs PWM & TEST----------------------
-  for(i=0;i<1024;i++)
+  for(i=1;i<255;i++)
   {
-    setRGBLEDColor(LEFT_RGB, i, i, i, 1);
-    setRGBLEDColor(RIGHT_RGB, i, i, i, 1);
-    delay(2);
+    setRGBLEDColor(RIGHT_RGB, HeatScale[i].R, HeatScale[i].G, HeatScale[i].B, 1);
+    setRGBLEDColor(LEFT_RGB, HeatScale[i].R, HeatScale[i].G, HeatScale[i].B, 1);
+    delay(5);
   }
   setSingleLEDValue(DPF_LED, LED_MAX, 1);
   delay(150);
@@ -156,18 +160,21 @@ void setup()
   delay(150);
   setSingleLEDValue(STATUS2_LED, 0, 0);
   delay(150);
+
   setRGBLEDColor(LEFT_RGB, LED_MAX, 0, 0, 1);
   setRGBLEDColor(RIGHT_RGB, LED_MAX, 0, 0, 1);
+  
 
   //-------------------SETUP LEDs END---------------------
   
   //-------------------Start NRF24L01+ Radio Module---------------------
   DEBUG_PORT.begin(115200);
   DEBUG_PORT.println("Start my RF24 now...");
-  startmyRF24();
-  radio.printPrettyDetails();
-  DEBUG_PORT.println("RF24 started up...");
   setRGBLEDColor(LEFT_RGB, LED_MAX, LED_MAX, 0, 1);
+  startmyRF24();
+  //radio.printPrettyDetails();
+  DEBUG_PORT.println("RF24 started up...");
+  setRGBLEDColor(LEFT_RGB, 0, LED_MAX, 0, 1);
   setRGBLEDColor(RIGHT_RGB, LED_MAX, LED_MAX, 0, 1);
   //-------------------Finished NRF24L01+ Radio Module Init---------------------
  
@@ -182,35 +189,47 @@ void setup()
   // ELM_PORT.setPin("0000");  
   if (!ELM_PORT.connect("OBDII"))
   {
-    DEBUG_PORT.println("Couldn't connect to OBD scanner - OBD Connection Failed!");
+    //DEBUG_PORT.println("Couldn't connect to OBD scanner - OBD Connection Failed!");
+    setRGBLEDColor(RIGHT_RGB,0,0,0,0);
+    setRGBLEDColor(LEFT_RGB,0,0,0,0);
+    playToneBuzzer(1, NOTE_A6);
+    playToneBuzzer(1, NOTE_A5);
+    playToneBuzzer(1, NOTE_A4);
     ESP.restart();  //reboot on error
   }
   // Connected to OBDII device
   // 3. Begin connection with ELM327 chip via BT Serial
   if (!myELM327.begin(ELM_PORT, false, 2000))
   {
-    Serial.println("Couldn't connect to OBD scanner - ELM327 Connection Failed!");
+    //Serial.println("Couldn't connect to OBD scanner - ELM327 Connection Failed!");
+    setRGBLEDColor(RIGHT_RGB,0,0,0,1);
+    setRGBLEDColor(LEFT_RGB,0,0,0,1);
+    playToneBuzzer(1, NOTE_A6);
+    playToneBuzzer(1, NOTE_A5);
+    playToneBuzzer(1, NOTE_A4);
     ESP.restart();  //reboot on error
   }
   // Finished connection setup with ELM327 chip via BT Serial.
-  Serial.println("Connected to ELM327");
+  //Serial.println("Connected to ELM327");
   // Switch off LEDs
-  setRGBLEDColor(RIGHT_RGB,0,0,0,0);
-  setRGBLEDColor(LEFT_RGB,0,0,0,0);
   setSingleLEDValue(DPF_LED,0,0);
   setSingleLEDValue(STATUS1_LED,LED_MAX,1); // Status 1 LED shows all is OK
-  setSingleLEDValue(STATUS2_LED,0,0);
+  setRGBLEDColor(RIGHT_RGB, 0, LED_MAX, 0, 1);
   playToneBuzzer(1, NOTE_A4);
   playToneBuzzer(1, NOTE_A5);
   playToneBuzzer(1, NOTE_A6);
+  setRGBLEDColor(RIGHT_RGB,0,0,0,0);
+  setRGBLEDColor(LEFT_RGB,0,0,0,0);
 }
 
 void loop()
 {
-  // Get timer value at starting point
+  /*-------------------------START OF MAIN LOOP--------------------------*/
+
+  /* ----------------- UPDATE MILLIS TIMER  -----------------*/
   unsigned long cTime = millis();
 
-  // Get data from radio module instantly, regardless of millis()
+  /* ----------------- RADIO MODULE GET DATA -----------------*/
   if(radio.available())
   {
     RADIO_UNAVAILABLE = 0;  // reset radio unavailable counter
@@ -237,10 +256,12 @@ void loop()
   }
 
 /*-------------------------START OF MAIN TIMED LOOP--------------------------*/
-  if(cTime % OBD_UPDATE_INTERVAL < 2)
+  if(cTime - prevTime1 >= OBD_UPDATE_INTERVAL)
   { 
+    DEBUG_PORT.println("OBDUPDATE_CYCLE_FIRED!");
+    prevTime1 = cTime;
     // check for the amount of NOT received radio cycles
-    if(RADIO_UNAVAILABLE>50000) // if there were too many NOT received cycles
+    if(RADIO_UNAVAILABLE>COOLANT_LEVEL_TIMEOUT) // if there were too many NOT received cycles
     {
       RADIO_UNAVAILABLE = 0;    // reset radio unavailable counter
       MY_COOLANT_LEVEL = 2;     // coolant state is unknown
@@ -301,43 +322,53 @@ void loop()
       default:
         break;
     }
-
     if(myELM327.nb_rx_state == ELM_SUCCESS)
     {
-      setSingleLEDValue(STATUS1_LED,LED_MAX,1);  // show status LED blink, when received value
-      setSingleLEDValue(DPF_LED,0,0);           // switch off DPF LED
+      //setSingleLEDValue(DPF_LED,0,0);           // switch off DPF LED
       queryFlag++;                              
       queryFlag%=4;                             // query increment & modulo division for switch between values to get
       errorCount = 0;                           // errors count is zeroed out, when ELM_SUCCESS occurs
-      printAllValues();                         // print out all read values to DEBUG_PORT (Serial)
-      setRGBLEDColor(LEFT_RGB,HeatScale[MY_ENGINE_OIL_TEMP+40].R,HeatScale[MY_ENGINE_OIL_TEMP+40].G,HeatScale[MY_ENGINE_OIL_TEMP+40].B,1);
-      setRGBLEDColor(RIGHT_RGB,HeatScale[MY_ENGINE_COOLANT_TEMP+40].R,HeatScale[MY_ENGINE_COOLANT_TEMP+40].G,HeatScale[MY_ENGINE_COOLANT_TEMP+40].B,1);
-      setSingleLEDValue(STATUS1_LED,0,0);        // show status LED blink, when received value
-      
-      if(MY_REGEN_STATE != 0)                   // alert with LED diesel particle filter (DPF) regeneration state
-        setSingleLEDValue(DPF_LED,LED_MAX,1);       
-      else
+      if(queryFlag == 0)                        // if data queries are done
+      {
+        // update all LEDs!
         setSingleLEDValue(DPF_LED,0,0);
-        
+        setSingleLEDValue(STATUS1_LED,LED_MAX,1);  // show status LED blink, when received value
+        printAllValues();                         // print out all read values to DEBUG_PORT (Serial)
+        setRGBLEDColor(RIGHT_RGB,HeatScale[MY_ENGINE_OIL_TEMP+40].R,HeatScale[MY_ENGINE_OIL_TEMP+40].G,HeatScale[MY_ENGINE_OIL_TEMP+40].B,1);
+        setRGBLEDColor(LEFT_RGB,HeatScale[MY_ENGINE_COOLANT_TEMP+40].R,HeatScale[MY_ENGINE_COOLANT_TEMP+40].G,HeatScale[MY_ENGINE_COOLANT_TEMP+40].B,1);
+        if(MY_REGEN_STATE != 0)                   // alert with LED diesel particle filter (DPF) regeneration state
+          setSingleLEDValue(DPF_LED,LED_MAX,1);       
+        else
+          setSingleLEDValue(DPF_LED,0,0);
+        setSingleLEDValue(STATUS1_LED,0,0);        // show status LED blink, when received value  
+      }
     }
     else if(myELM327.nb_rx_state != ELM_GETTING_MSG)  // alert with blank STATUS LED for bad received data
-    {
-      setSingleLEDValue(STATUS1_LED,0,0);
-      Serial.println("ELM ERROR OCCURRED");
-      myELM327.printError();
-      errorCount++;                              // increase number of errors occured
-    }
-
+      {
+        setSingleLEDValue(STATUS1_LED,0,0);
+        DEBUG_PORT.println("ELM ERROR OCCURRED");
+        //myELM327.printError();
+        errorCount++;                              // increase number of errors occured
+      }
   }
 /*-------------------------END OF MAIN TIMED LOOP--------------------------*/
 
+/*-------------------------START OF UNTIMED ELM UPDATE LOOP--------------------------*/
+
+  
 
 /*-------------------------ERROR HANDLING START--------------------------*/
-  if(errorCount>40)
+  if(errorCount>ELM_ERROR_MAX)
   {
+    setRGBLEDColor(RIGHT_RGB,LED_MAX,0,LED_MAX,1);
+    setRGBLEDColor(LEFT_RGB,LED_MAX,0,LED_MAX,1);
+    playToneBuzzer(1, NOTE_A6);
+    playToneBuzzer(1, NOTE_A5);
+    playToneBuzzer(1, NOTE_A4);
     ESP.restart();
   }
-/*-------------------------ERROR HANDLING END--------------------------*/
+
+/*-------------------------END OF MAIN LOOP--------------------------*/
 }
 
 void setRGBLEDColor(uint8_t ID, uint16_t R, uint16_t G, uint16_t B, float brightness)
@@ -388,23 +419,8 @@ void setSingleLEDValue(uint8_t ID, uint16_t value, float brightness)
   }
 }
 
-float getBackgroundLightLevel()
-{
-  /*
-  while (!lightMeter.measurementReady(true)) 
-  {
-    yield();
-  }
-  float lux = lightMeter.readLightLevel();
-  lux = lux/54700;
-  lightMeter.configure(BH1750::ONE_TIME_HIGH_RES_MODE);
-  return lux;
-  */
-}
-
 void removeAllBonded()
-{
-  
+{ 
   DEBUG_PORT.begin(115200);
   initBluetooth();
   DEBUG_PORT.print("ESP32 bluetooth address: ");
@@ -469,19 +485,18 @@ bool initBluetooth()
 
 void startmyRF24()
 {
-const byte RF24_ADDR[6] = {"00001"};
-while(!radio.begin()) 
-  {
-    DEBUG_PORT.println(F("NRF24L01 hardware is not responding, retrying..."));
-    delay(1000);
-  }
-int result = 1;
-radio.openReadingPipe(0, RF24_ADDR);
-radio.setPALevel(RF24_PA_MIN);
-//radio.setDataRate(RF24_250KBPS);
-radio.startListening();
-DEBUG_PORT.println("NRF24L01 hardware is listening!");
-
+  const byte RF24_ADDR[6] = {"00001"};
+  while(!radio.begin()) 
+    {
+      DEBUG_PORT.println(F("NRF24L01 hardware is not responding, retrying..."));
+      delay(1000);
+    }
+  int result = 1;
+  radio.openReadingPipe(0, RF24_ADDR);
+  radio.setPALevel(RF24_PA_MIN);
+  //radio.setDataRate(RF24_250KBPS);
+  radio.startListening();
+  DEBUG_PORT.println("NRF24L01 hardware is listening!");
 }
 
 void playToneBuzzer(uint8_t num_beeps, uint32_t note)
