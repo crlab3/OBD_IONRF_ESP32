@@ -49,6 +49,8 @@ BluetoothSerial SerialBT;
 
 #define BUZZER_PIN 4
 #define BUZZER_PWM_CHN 10
+#define LIGHT_IN 34 // analog light input
+#define LIGHT_MAX 4096  // maximum light value that can be measured
 
 //bonding removal stuff
 #define REMOVE_BONDED_DEVICES 1   // <- Set to 0 to view all bonded devices addresses, set to 1 to remove
@@ -85,6 +87,8 @@ void setRGBLEDColor(uint8_t ID, uint16_t R, uint16_t G, uint16_t B, float bright
 void startmyRF24();
 void playToneBuzzer(uint8_t num_beeps, uint32_t note);
 void printAllValues();
+void setupADC();
+float getLightValue();
 
 void removeAllBonded();
 bool initBluetooth();
@@ -98,7 +102,15 @@ uint8_t ELMStateSuccess = 1;
 
 void setup()
 {
-
+  // setup ADC
+  setupADC();
+  while(1)
+  {
+    float lightValue = getLightValue();
+    DEBUG_PORT.println("Measured ADC Value:");
+    DEBUG_PORT.println(lightValue);
+    delay(1000);
+  }
   // create HeatScale
   int j=0;
   for(j=0;j<255;j++)
@@ -219,6 +231,8 @@ void setup()
   playToneBuzzer(1, NOTE_A6);
   setRGBLEDColor(RIGHT_RGB,0,0,0,0);
   setRGBLEDColor(LEFT_RGB,0,0,0,0);
+  // for testing new ADC measurement!!!
+
 }
 
 void loop()
@@ -265,7 +279,6 @@ void loop()
       RADIO_UNAVAILABLE = 0;    // reset radio unavailable counter
       MY_COOLANT_LEVEL = 2;     // coolant state is unknown
     }
-
     // cycle through OBD and sensor queries
     switch (queryFlag) 
     {
@@ -399,6 +412,10 @@ void setRGBLEDColor(uint8_t ID, uint16_t R, uint16_t G, uint16_t B, float bright
 
 void setSingleLEDValue(uint8_t ID, uint16_t value, float brightness)
 {
+  if(brightness>1)
+    brightness = 1;
+  if(brightness<0)
+    brightness = 0;
   value = value*brightness;
   if(value>=0)
     {
@@ -548,4 +565,20 @@ void printAllValues()
       DEBUG_PORT.println("ERROR");
       break;
   }
+}
+
+void setupADC()
+{
+  // ADC_0db, ADC_2_5db, ADC_6db, ADC_11db
+  while(!adcAttachPin(LIGHT_IN));
+  analogSetClockDiv(128);
+  analogSetPinAttenuation(LIGHT_IN, ADC_2_5db);
+}
+float getLightValue()
+{
+  uint16_t measurement = 0;
+  measurement = analogRead(LIGHT_IN);
+  // Maximum is 4096
+  /* do the brightness calculations here, with inverted logic!*/
+  return measurement/LIGHT_MAX;
 }
