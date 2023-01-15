@@ -41,6 +41,7 @@ void loop()
   digitalWrite(XKC_ACTIVATE,1);
   delay(50);
   uint8_t cycleCount = 0;
+  uint8_t i = 0;
   for(i=0;i<3;i++)
   {
     // Send packet 3 times

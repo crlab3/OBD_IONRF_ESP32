@@ -27,7 +27,7 @@ BluetoothSerial SerialBT;
 
 #define OBD_UPDATE_INTERVAL 100
 #define COOLANT_LOW_LIMIT 10
-#define COOLANT_LEVEL_TIMEOUT 100000
+#define COOLANT_LEVEL_TIMEOUT 10000000
 #define ELM_ERROR_MAX 10
 #define ELMTIMEOUT 10000
 /*GPIOs*/
@@ -104,13 +104,6 @@ void setup()
 {
   // setup ADC
   setupADC();
-  while(1)
-  {
-    float lightValue = getLightValue();
-    DEBUG_PORT.println("Measured ADC Value:");
-    DEBUG_PORT.println(lightValue);
-    delay(1000);
-  }
   // create HeatScale
   int j=0;
   for(j=0;j<255;j++)
@@ -187,6 +180,7 @@ void setup()
   DEBUG_PORT.println("RF24 started up...");
   setRGBLEDColor(LEFT_RGB, 0, LED_MAX, 0, 1);
   setRGBLEDColor(RIGHT_RGB, LED_MAX, LED_MAX, 0, 1);
+
   //-------------------Finished NRF24L01+ Radio Module Init---------------------
  
   //-------------------Start Bluetooth Connection---------------------
