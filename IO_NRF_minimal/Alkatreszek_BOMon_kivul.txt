@@ -9,8 +9,8 @@ Inline Blade Fuse Tap MP001005 Multicomp
 Farnell: 3227155
 eBay: 
 
-Hengeres kábelsaru D=4mm
-LOMEX: 43-04-12
+WAGO 221-INLINE
+HEStore: WAGO 221-2411
 
 Szemes kábelsaru 6mm
 LOMEX: 43-20-10
@@ -18,5 +18,5 @@ LOMEX: 43-20-10
 Hangszóró vezeték
 LOMEX: 54-00-60
 
-Szigetelő szilikoncső
-LOMEX: 53-01-83
+Autósbiztosíték csomag
+HEStore: KAE 5-30 - mindenféle méret egyben
