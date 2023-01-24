@@ -12,6 +12,7 @@
 #include "esp_bt_device.h"
 #include"esp_gap_bt_api.h"
 #include "esp_err.h"
+#include "string.h"
 
 #define GR_CORR 0.5
 
@@ -99,7 +100,7 @@ uint16_t loopCount = 0;
 uint32_t prevTime1 = 0;
 uint32_t ELMPrevTime = 0;
 uint8_t ELMStateSuccess = 1;
-
+BTAddress devAddress;
 void setup()
 {
   // setup ADC
@@ -188,19 +189,35 @@ void setup()
   removeAllBonded();
 
   // 2. Start connection to OBDII device
-  ELM_PORT.begin("OBDII", true);
-  
-  // 2.1 If needed set PIN code
-  // ELM_PORT.setPin("0000");  
-  if (!ELM_PORT.connect("OBDII"))
+  ELM_PORT.begin("MyDev", true);
+  BTScanResults* btDeviceList = ELM_PORT.getScanResults();
+  if (SerialBT.discoverAsync([](BTAdvertisedDevice* pDevice) 
   {
-    //DEBUG_PORT.println("Couldn't connect to OBD scanner - OBD Connection Failed!");
-    setRGBLEDColor(RIGHT_RGB,0,0,0,0);
-    setRGBLEDColor(LEFT_RGB,0,0,0,0);
-    playToneBuzzer(1, NOTE_A6);
-    playToneBuzzer(1, NOTE_A5);
-    playToneBuzzer(1, NOTE_A4);
-    ESP.restart();  //reboot on error
+      BTAddress btadr = pDevice->getName();
+      const char * devName = btadr.toString().c_str();
+      if(strcmp(devName,"OBDII"))
+      {
+        devAddress = pDevice->getAddress();
+      }
+  } )
+    )
+  {
+  delay(5000);
+  }
+
+  if (!ELM_PORT.connect(devAddress))
+  {
+    ELM_PORT.setPin("1234");
+    if (!ELM_PORT.connect(devAddress))
+    {
+      //DEBUG_PORT.println("Couldn't connect to OBD scanner - OBD Connection Failed!");
+      setRGBLEDColor(RIGHT_RGB,0,0,0,0);
+      setRGBLEDColor(LEFT_RGB,0,0,0,0);
+      playToneBuzzer(1, NOTE_A6);
+      playToneBuzzer(1, NOTE_A5);
+      playToneBuzzer(1, NOTE_A4);
+      ESP.restart();  //reboot on error
+    }
   }
   // Connected to OBDII device
   // 3. Begin connection with ELM327 chip via BT Serial
@@ -435,7 +452,6 @@ void setSingleLEDValue(uint8_t ID, uint16_t value, float brightness)
 
 void removeAllBonded()
 { 
-  DEBUG_PORT.begin(115200);
   initBluetooth();
   DEBUG_PORT.print("ESP32 bluetooth address: ");
   DEBUG_PORT.println(bda2str(esp_bt_dev_get_address(), bda_str, 18));
