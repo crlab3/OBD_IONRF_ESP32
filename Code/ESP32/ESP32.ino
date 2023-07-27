@@ -167,11 +167,11 @@ void setup()
   
   //-------------------Start NRF24L01+ Radio Module---------------------
   DEBUG_PORT.begin(115200);
-  //DEBUG_PORT.println("Start my RF24 now...");
+  DEBUG_PORT.println("Start NRF24L01+ Radio Module now...");
   setRGBLEDColor(LEFT_RGB, LED_MAX, LED_MAX, 0, 1);
   startmyRF24();
   //radio.printPrettyDetails();
-  //DEBUG_PORT.println("RF24 started up...");
+  DEBUG_PORT.println("NRF24L01+ started up.");
   setRGBLEDColor(LEFT_RGB, 0, LED_MAX, 0, 1);
   setRGBLEDColor(RIGHT_RGB, LED_MAX, LED_MAX, 0, 1);
 
@@ -179,12 +179,12 @@ void setup()
  
   //-------------------Start Bluetooth Connection---------------------
   // 1. Remove all bonded devices.  
-  //DEBUG_PORT.println("Removing bonded bluetooth devices...");
+  DEBUG_PORT.println("Removing bonded bluetooth devices...");
   removeAllBonded();
-  //DEBUG_PORT.println("Removed bonded bluetooth devices successfully!");
+  DEBUG_PORT.println("Removed bonded bluetooth devices successfully!");
 
   // 2. Start connection to OBDII device
-  //DEBUG_PORT.println("ELM: Scanning begin...");
+  DEBUG_PORT.println("ESP32: Scanning begin for ELM327 device...");
   ELM_PORT.begin("MyDev", true);
   BTScanResults* btDeviceList = ELM_PORT.getScanResults();
   if (SerialBT.discoverAsync([](BTAdvertisedDevice* pDevice) 
@@ -206,7 +206,7 @@ void setup()
     ELM_PORT.setPin("1234");
     if (!ELM_PORT.connect(devAddress))
     {
-      //DEBUG_PORT.println("ELM: Couldn't connect to OBD scanner. Rebooting...");
+      DEBUG_PORT.println("ESP32: Couldn't connect to ELM327. Rebooting...");
       setRGBLEDColor(RIGHT_RGB,0,0,0,0);
       setRGBLEDColor(LEFT_RGB,0,0,0,0);
       playToneBuzzer(1, NOTE_A6);
@@ -215,13 +215,13 @@ void setup()
       ESP.restart();  //reboot on error
     }
   }
-  //DEBUG_PORT.println("ELM: Connected to OBD device successfully!");
+  DEBUG_PORT.println("ESP32: Connected to ELM327 successfully!");
   // Connected to OBDII device
   // 3. Begin connection with ELM327 chip via BT Serial
-  //DEBUG_PORT.println("ELM: Begin bluetooth serial connection...");
+  DEBUG_PORT.println("ESP32: Begin bluetooth serial connection with ELM327...");
   if (!myELM327.begin(ELM_PORT, false, 2000))
   {
-    //DEBUG_PORT.println("ELM: Could not establish serial connection. Rebooting...");
+    DEBUG_PORT.println("ESP32: Could not establish bluetooth serial connection with ELM327. Rebooting...");
     setRGBLEDColor(RIGHT_RGB,0,0,0,1);
     setRGBLEDColor(LEFT_RGB,0,0,0,1);
     playToneBuzzer(1, NOTE_A6);
@@ -230,7 +230,7 @@ void setup()
     ESP.restart();  //reboot on error
   }
   // Finished connection setup with ELM327 chip via BT Serial.
-  //DEBUG_PORT.println("ELM: Serial connection to ELM327 successful.");
+  DEBUG_PORT.println("ESP32: Bluetooth serial connection to ELM327 successful.");
   // Switch off LEDs
   setSingleLEDValue(DPF_LED,0,0);
   setSingleLEDValue(STATUS1_LED,LED_MAX,1); // Status 1 LED shows all is OK
@@ -254,9 +254,9 @@ void loop()
   {
     RADIO_UNAVAILABLE = 0;  // reset radio unavailable counter
     char buffer[10];
-    //DEBUG_PORT.println("Received NRF24L01 packet...");
+    DEBUG_PORT.print("Received NRF24L01 packet:");
     radio.read(&buffer, sizeof(buffer));
-    //DEBUG_PORT.println(buffer);
+    DEBUG_PORT.println(buffer);
     if(buffer[0]=='?' && buffer[4]=='$')  // if valid packet is received
     {
       if(buffer[3]=='L')
@@ -278,7 +278,7 @@ void loop()
 /*-------------------------START OF MAIN TIMED LOOP--------------------------*/
   if(cTime - prevTime1 >= OBD_UPDATE_INTERVAL)
   { 
-    //DEBUG_PORT.println("=======OBD_UPDATE_INTERVAL elapsed, cycle run start.========");
+    DEBUG_PORT.println("======= OBD_UPDATE_INTERVAL elapsed, cycle run start. ========");
     prevTime1 = cTime;
     // check for the amount of NOT received radio cycles
     if(RADIO_UNAVAILABLE>COOLANT_LEVEL_TIMEOUT) // if there were too many NOT received cycles
@@ -291,11 +291,11 @@ void loop()
     {
       case 0: 
         MY_ENGINE_OIL_TEMP = (uint32_t)myELM327.oilTemp();
-        //DEBUG_PORT.println("queried engine oil.");
+        DEBUG_PORT.println("ESP32: Queried engine oil.");
         break;
       case 1:
         MY_ENGINE_COOLANT_TEMP = (uint32_t)myELM327.engineCoolantTemp();
-        //DEBUG_PORT.println("queried engine coolant.");
+        DEBUG_PORT.println("ESP32: Queried engine coolant.");
         break;
       case 2:
         {
@@ -303,7 +303,7 @@ void loop()
           {
             case 0:
             {
-              //DEBUG_PORT.println("Coolant level: LOW!");
+              DEBUG_PORT.println("Coolant level: LOW!");
               COOLANT_LOW_CNTR++; // coolant level low indicated, counter increment!
               setSingleLEDValue(CLNTSTATUS_LED,0,0); // inverted logic
               playToneBuzzer(1, NOTE_F5);
@@ -325,15 +325,15 @@ void loop()
             break;
             case 1:
             {
-              //DEBUG_PORT.println("Coolant level: OK.");
-              setSingleLEDValue(CLNTSTATUS_LED,0,0); // inverted logic
+              DEBUG_PORT.println("Coolant level: OK.");
+              setSingleLEDValue(CLNTSTATUS_LED,0,0); 
               COOLANT_LOW_CNTR = 0; // reset coolant low indicator
             }
             break;
             case 2:
             {
-              //DEBUG_PORT.println("Coolant level unknown...");
-              setSingleLEDValue(CLNTSTATUS_LED,LED_MAX,1); // inverted logic
+              DEBUG_PORT.println("Coolant level: UNKNOWN.");
+              setSingleLEDValue(CLNTSTATUS_LED,LED_MAX,1); 
             }
             break;
           }
@@ -341,7 +341,7 @@ void loop()
         break;
       case 3:
         MY_REGEN_STATE = (uint32_t)myELM327.processPID(0x22,0x0380,1,1,1,0);
-        //DEBUG_PORT.println("queried regen state.");
+        DEBUG_PORT.println("ESP32: Queried DPF regeneration state.");
         break;
       default:
         break;
@@ -352,14 +352,14 @@ void loop()
     {
       queryFlag++;
       queryFlag%=4;
-      //DEBUG_PORT.println("========ELM SUCCESS========");
+      DEBUG_PORT.println("========ELM SUCCESS========");
       errorCount = 0;                           // errors count is zeroed out, when ELM_SUCCESS occurs
       // update all LEDs!
       if(queryFlag == 0)
       { //update only when all values are found
         setSingleLEDValue(DPF_LED,0,0);
         setSingleLEDValue(STATUS1_LED,LED_MAX,1);  // show status LED blink, when received value
-        //printAllValues();                         // print out all read values to DEBUG_PORT (Serial)
+        printAllValues();                         // print out all read values to DEBUG_PORT (Serial)
         setRGBLEDColor(RIGHT_RGB,HeatScale[MY_ENGINE_OIL_TEMP+40].R,HeatScale[MY_ENGINE_OIL_TEMP+40].G,HeatScale[MY_ENGINE_OIL_TEMP+40].B,1);
         setRGBLEDColor(LEFT_RGB,HeatScale[MY_ENGINE_COOLANT_TEMP+40].R,HeatScale[MY_ENGINE_COOLANT_TEMP+40].G,HeatScale[MY_ENGINE_COOLANT_TEMP+40].B,1);
         if(MY_REGEN_STATE != 0)                   // alert with LED diesel particle filter (DPF) regeneration state
@@ -373,7 +373,7 @@ void loop()
     else if(myELM327.nb_rx_state != ELM_GETTING_MSG)  // alert with blank STATUS LED for bad received data
       {
         setSingleLEDValue(STATUS1_LED,0,0);
-        //DEBUG_PORT.println("ELM ERROR OCCURRED");
+        DEBUG_PORT.println("========ELM ERROR OCCURRED========");
         //myELM327.printError();
         errorCount++;                              // increase number of errors occured
       }
@@ -384,11 +384,13 @@ void loop()
 /*-------------------------ERROR HANDLING START--------------------------*/
   if(errorCount>ELM_ERROR_MAX)
   {
+    DEBUG_PORT.println("========ELM ERROR MAX REACHED========");
     setRGBLEDColor(RIGHT_RGB,LED_MAX,0,LED_MAX,1);
     setRGBLEDColor(LEFT_RGB,LED_MAX,0,LED_MAX,1);
     playToneBuzzer(1, NOTE_A6);
     playToneBuzzer(1, NOTE_A5);
     playToneBuzzer(1, NOTE_A4);
+    DEBUG_PORT.println("Rebooting.");
     ESP.restart();
   }
 
