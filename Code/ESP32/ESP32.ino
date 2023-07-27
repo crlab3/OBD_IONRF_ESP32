@@ -12,6 +12,7 @@
 #include "esp_bt_device.h"
 #include"esp_gap_bt_api.h"
 #include "esp_err.h"
+#include "string.h"
 
 #define GR_CORR 0.5
 
@@ -26,8 +27,9 @@ BluetoothSerial SerialBT;
 #define NRF_CS 5
 
 #define OBD_UPDATE_INTERVAL 100
+#define LIGHT_UPDATE_INTERVAL 1000
 #define COOLANT_LOW_LIMIT 10
-#define COOLANT_LEVEL_TIMEOUT 100000
+#define COOLANT_LEVEL_TIMEOUT 400000
 #define ELM_ERROR_MAX 10
 #define ELMTIMEOUT 10000
 /*GPIOs*/
@@ -45,10 +47,13 @@ BluetoothSerial SerialBT;
 
 #define DPF_LED 12
 #define STATUS1_LED 26
-#define STATUS2_LED 27
+#define CLNTSTATUS_LED 27
 
 #define BUZZER_PIN 4
 #define BUZZER_PWM_CHN 10
+#define LIGHT_IN 34 // analog light input
+#define LIGHT_MAX 4096  // maximum light value that can be measured
+#define LIGHT_AVGNUM 4096
 
 //bonding removal stuff
 #define REMOVE_BONDED_DEVICES 1   // <- Set to 0 to view all bonded devices addresses, set to 1 to remove
@@ -85,6 +90,8 @@ void setRGBLEDColor(uint8_t ID, uint16_t R, uint16_t G, uint16_t B, float bright
 void startmyRF24();
 void playToneBuzzer(uint8_t num_beeps, uint32_t note);
 void printAllValues();
+void setupADC();
+uint16_t getLightValue();
 
 void removeAllBonded();
 bool initBluetooth();
@@ -92,13 +99,17 @@ char *bda2str(const uint8_t* bda, char *str, size_t size);
 uint8_t errorCount = 0;
 uint8_t queryFlag = 0;
 uint16_t loopCount = 0;
-uint32_t prevTime1 = 0;
+uint16_t lowLight = 0, highLight = 0, lightCalibrationValue = 0;
+uint32_t currentLight = 0;
+uint32_t prevTime1,prevTime2 = 0;
 uint32_t ELMPrevTime = 0;
 uint8_t ELMStateSuccess = 1;
-
+uint8_t daytime = 0;
+BTAddress devAddress;
 void setup()
 {
-
+  // setup ADC
+  setupADC();
   // create HeatScale
   int j=0;
   for(j=0;j<255;j++)
@@ -131,7 +142,7 @@ void setup()
 
   //-------------------SETUP LEDs---------------------
   
-  uint8_t LEDPins[9]={RGB_RIGHT_RED,RGB_RIGHT_GREEN,RGB_RIGHT_BLUE,RGB_LEFT_RED,RGB_LEFT_GREEN,RGB_LEFT_BLUE,DPF_LED,STATUS1_LED,STATUS2_LED};
+  uint8_t LEDPins[9]={RGB_RIGHT_RED,RGB_RIGHT_GREEN,RGB_RIGHT_BLUE,RGB_LEFT_RED,RGB_LEFT_GREEN,RGB_LEFT_BLUE,DPF_LED,STATUS1_LED,CLNTSTATUS_LED};
   int i = 0;
   for(i=0; i<9; i++)
   {
@@ -139,7 +150,10 @@ void setup()
     ledcAttachPin(LEDPins[i], i);  
     ledcWrite(i, LED_MAX);  //inverted logic!, 1023 = zero light
   }
-
+  // Measure light //
+  setupADC();
+  // Measure light end//
+  
   //-------------------START LEDs PWM & TEST----------------------
   for(i=1;i<255;i++)
   {
@@ -151,13 +165,13 @@ void setup()
   delay(150);
   setSingleLEDValue(STATUS1_LED, LED_MAX, 1);
   delay(150);
-  setSingleLEDValue(STATUS2_LED, LED_MAX, 1);
+  setSingleLEDValue(CLNTSTATUS_LED, LED_MAX, 1);
   delay(150);
   setSingleLEDValue(DPF_LED, 0, 0);
   delay(150);
   setSingleLEDValue(STATUS1_LED, 0, 0);
   delay(150);
-  setSingleLEDValue(STATUS2_LED, 0, 0);
+  setSingleLEDValue(CLNTSTATUS_LED, 0, 0);
   delay(150);
 
   setRGBLEDColor(LEFT_RGB, LED_MAX, 0, 0, 1);
@@ -175,6 +189,7 @@ void setup()
   DEBUG_PORT.println("RF24 started up...");
   setRGBLEDColor(LEFT_RGB, 0, LED_MAX, 0, 1);
   setRGBLEDColor(RIGHT_RGB, LED_MAX, LED_MAX, 0, 1);
+
   //-------------------Finished NRF24L01+ Radio Module Init---------------------
  
   //-------------------Start Bluetooth Connection---------------------
@@ -182,19 +197,35 @@ void setup()
   removeAllBonded();
 
   // 2. Start connection to OBDII device
-  ELM_PORT.begin("OBDII", true);
-  
-  // 2.1 If needed set PIN code
-  // ELM_PORT.setPin("0000");  
-  if (!ELM_PORT.connect("OBDII"))
+  ELM_PORT.begin("MyDev", true);
+  BTScanResults* btDeviceList = ELM_PORT.getScanResults();
+  if (SerialBT.discoverAsync([](BTAdvertisedDevice* pDevice) 
   {
-    //DEBUG_PORT.println("Couldn't connect to OBD scanner - OBD Connection Failed!");
-    setRGBLEDColor(RIGHT_RGB,0,0,0,0);
-    setRGBLEDColor(LEFT_RGB,0,0,0,0);
-    playToneBuzzer(1, NOTE_A6);
-    playToneBuzzer(1, NOTE_A5);
-    playToneBuzzer(1, NOTE_A4);
-    ESP.restart();  //reboot on error
+      BTAddress btadr = pDevice->getName();
+      const char * devName = btadr.toString().c_str();
+      if(strcmp(devName,"OBDII"))
+      {
+        devAddress = pDevice->getAddress();
+      }
+  } )
+    )
+  {
+  delay(5000);
+  }
+
+  if (!ELM_PORT.connect(devAddress))
+  {
+    ELM_PORT.setPin("1234");
+    if (!ELM_PORT.connect(devAddress))
+    {
+      //DEBUG_PORT.println("Couldn't connect to OBD scanner - OBD Connection Failed!");
+      setRGBLEDColor(RIGHT_RGB,0,0,0,0);
+      setRGBLEDColor(LEFT_RGB,0,0,0,0);
+      playToneBuzzer(1, NOTE_A6);
+      playToneBuzzer(1, NOTE_A5);
+      playToneBuzzer(1, NOTE_A4);
+      ESP.restart();  //reboot on error
+    }
   }
   // Connected to OBDII device
   // 3. Begin connection with ELM327 chip via BT Serial
@@ -219,6 +250,7 @@ void setup()
   playToneBuzzer(1, NOTE_A6);
   setRGBLEDColor(RIGHT_RGB,0,0,0,0);
   setRGBLEDColor(LEFT_RGB,0,0,0,0);
+  // for testing new ADC measurement!!!
 }
 
 void loop()
@@ -265,7 +297,6 @@ void loop()
       RADIO_UNAVAILABLE = 0;    // reset radio unavailable counter
       MY_COOLANT_LEVEL = 2;     // coolant state is unknown
     }
-
     // cycle through OBD and sensor queries
     switch (queryFlag) 
     {
@@ -283,9 +314,9 @@ void loop()
           {
             case 0:
             {
-              DEBUG_PORT.println("Coolant LVL LOW!");
+              //DEBUG_PORT.println("Coolant LVL LOW!");
               COOLANT_LOW_CNTR++; // coolant level low indicated, counter increment!
-              setSingleLEDValue(STATUS2_LED,0,0); // inverted logic
+              setSingleLEDValue(CLNTSTATUS_LED,0,0); // inverted logic
               playToneBuzzer(1, NOTE_F5);
               if(COOLANT_LOW_CNTR>COOLANT_LOW_LIMIT)
               {
@@ -293,8 +324,10 @@ void loop()
                 for(i=0;i<5;i++)
                 {
                   setRGBLEDColor(RIGHT_RGB, 0,0,0,0);
+                  setRGBLEDColor(LEFT_RGB, 0,0,0,0);
                   playToneBuzzer(5, NOTE_F5);
-                  setRGBLEDColor(RIGHT_RGB, LED_MAX,LED_MAX,LED_MAX, 1);
+                  setRGBLEDColor(RIGHT_RGB,LED_MAX,0,0,1);
+                  setRGBLEDColor(LEFT_RGB,LED_MAX,0,0,1);
                   playToneBuzzer(5, NOTE_F5);
                 }
                 COOLANT_LOW_CNTR = 0; //Reset counter.
@@ -303,15 +336,15 @@ void loop()
             break;
             case 1:
             {
-              DEBUG_PORT.println("Coolant LVL OK.");
-              setSingleLEDValue(STATUS2_LED,0,0); // inverted logic
+              //DEBUG_PORT.println("Coolant LVL OK.");
+              setSingleLEDValue(CLNTSTATUS_LED,0,0); // inverted logic
               COOLANT_LOW_CNTR = 0; // reset coolant low indicator
             }
             break;
             case 2:
             {
-              DEBUG_PORT.println("Coolant LVL unknown...");
-              setSingleLEDValue(STATUS2_LED,LED_MAX,1); // inverted logic
+              //DEBUG_PORT.println("Coolant LVL unknown...");
+              setSingleLEDValue(CLNTSTATUS_LED,LED_MAX,1); // inverted logic
             }
             break;
           }
@@ -325,11 +358,12 @@ void loop()
         break;
     }
 
+    
     if(myELM327.nb_rx_state == ELM_SUCCESS)
     {
       queryFlag++;
       queryFlag%=4;
-      DEBUG_PORT.println("----ELM SUCCESS----");
+      //DEBUG_PORT.println("----ELM SUCCESS----");
       //setSingleLEDValue(DPF_LED,0,0);           // switch off DPF LED
       errorCount = 0;                           // errors count is zeroed out, when ELM_SUCCESS occurs
       // update all LEDs!
@@ -355,6 +389,7 @@ void loop()
         //myELM327.printError();
         errorCount++;                              // increase number of errors occured
       }
+    
   }
 /*-------------------------END OF MAIN TIMED LOOP--------------------------*/
 
@@ -399,6 +434,10 @@ void setRGBLEDColor(uint8_t ID, uint16_t R, uint16_t G, uint16_t B, float bright
 
 void setSingleLEDValue(uint8_t ID, uint16_t value, float brightness)
 {
+  if(brightness>1)
+    brightness = 1;
+  if(brightness<0)
+    brightness = 0;
   value = value*brightness;
   if(value>=0)
     {
@@ -412,7 +451,7 @@ void setSingleLEDValue(uint8_t ID, uint16_t value, float brightness)
       ledcWrite(7,(LED_MAX-value)*(1-brightness));
       break;
 
-    case STATUS2_LED:
+    case CLNTSTATUS_LED:
       ledcWrite(8,(LED_MAX-value)*(1-brightness));
       break;
     
@@ -424,7 +463,6 @@ void setSingleLEDValue(uint8_t ID, uint16_t value, float brightness)
 
 void removeAllBonded()
 { 
-  DEBUG_PORT.begin(115200);
   initBluetooth();
   DEBUG_PORT.print("ESP32 bluetooth address: ");
   DEBUG_PORT.println(bda2str(esp_bt_dev_get_address(), bda_str, 18));
@@ -548,4 +586,20 @@ void printAllValues()
       DEBUG_PORT.println("ERROR");
       break;
   }
+}
+
+void setupADC()
+{
+  // ADC_0db, ADC_2_5db, ADC_6db, ADC_11db
+  while(!adcAttachPin(LIGHT_IN));
+  analogSetClockDiv(128);
+  analogSetPinAttenuation(LIGHT_IN, ADC_0db);
+}
+uint16_t getLightValue()
+{
+  uint16_t measurement = 0;
+  measurement = analogRead(LIGHT_IN);
+  // Maximum is 4096
+  /* do the brightness calculations here, with inverted logic!*/
+  return measurement;
 }
