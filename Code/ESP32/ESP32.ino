@@ -20,6 +20,13 @@ BluetoothSerial SerialBT;
 #define ELM_PORT SerialBT
 #define DEBUG_PORT Serial
 
+#define TEMP_LOW_L 0  // -40C 
+#define TEMP_LOW_U 90 // +50C
+#define TEMP_MID_L 91 // +51C
+#define TEMP_MID_U 124 // +84C
+#define TEMP_OK_L 125 // +85C
+#define TEMP_OK_U 150 // +110C
+
 #define RES_PWM 10
 #define LED_MAX 1023
 
@@ -102,25 +109,25 @@ void setup()
   int j=0;
   for(j=0;j<255;j++)
   {
-    if(j>=0 && j<=90) //from -40C to +50C BLUE
+    if(j>=TEMP_LOW_L && j<=TEMP_LOW_U) //from -40C to +50C BLUE
     {
       HeatScale[j].B = LED_MAX;
       HeatScale[j].R = 0;
       HeatScale[j].G = 0; 
     }
-    if(j>90 && j<=120) //from +50C to 80C WHITE
+    if(j>TEMP_LOW_U && j<=TEMP_MID_U) //from +50C to 85C WHITE
     {
       HeatScale[j].B = LED_MAX;
       HeatScale[j].R = LED_MAX;
       HeatScale[j].G = LED_MAX; 
     }
-    if(j>120 && j<=145) //from +80C to 105C YELLOW
+    if(j>TEMP_OK_L && j<=TEMP_OK_U) //from +80C to 110C YELLOW
     {
       HeatScale[j].B = 0;
       HeatScale[j].R = LED_MAX;
       HeatScale[j].G = LED_MAX/2; 
     }
-    if(j>145 && j<255) //above 105C RED
+    if(j>TEMP_OK_U && j<255) //above 110C RED
     {
       HeatScale[j].B = 0;
       HeatScale[j].R = LED_MAX;
